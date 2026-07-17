@@ -43,8 +43,10 @@ public struct NanolyticaOptions {
 
     static func defaultUserAgent() -> String {
         let v = "NanolyticaSwiftSDK/\(Nanolytica.version)"
-        #if os(iOS) || os(tvOS)
+        #if os(iOS)
         let os = "iOS"
+        #elseif os(tvOS)
+        let os = "tvOS"
         #elseif os(macOS)
         let os = "macOS"
         #elseif os(watchOS)
@@ -63,6 +65,7 @@ public final class Nanolytica {
     private let queueLock = NSRecursiveLock()
     private let worker = DispatchQueue(label: "org.nanolytica.delivery")
     private var generation = 0
+    private var scheduled = false
     private var task: URLSessionDataTask?
     private let storageOverride: URL?
     private var queue: [Data] = []
@@ -207,13 +210,17 @@ public final class Nanolytica {
         guard let body = try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]) else { return }
         if queue.count >= options.bufferSize { queue.removeFirst() }
         queue.append(body)
-        flush()
+        if !scheduled {
+            scheduled = true
+            worker.async { [weak self] in self?.drain() }
+        }
     }
 
     private func drain() {
+        queueLock.lock(); scheduled = true; queueLock.unlock()
         while true {
             queueLock.lock()
-            guard !optedOut, !queue.isEmpty else { queueLock.unlock(); return }
+            guard !optedOut, !queue.isEmpty else { scheduled = false; queueLock.unlock(); return }
             let next = queue.removeFirst(), scope = generation, config = options
             queueLock.unlock()
             let ok = send(next, generation: scope, options: config)
@@ -223,8 +230,9 @@ public final class Nanolytica {
                     queue.insert(next, at: 0)
                     if queue.count > options.bufferSize { queue.removeLast() }
                 }
-                persist()
+                if let url = storageOverride ?? Self.storageURL(), FileManager.default.fileExists(atPath: url.path) { persist() }
             }
+            if !ok { scheduled = false }
             queueLock.unlock()
             if !ok { return }
         }
