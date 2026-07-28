@@ -17,7 +17,7 @@ let package = Package(
             path: "Sources/Nanolytica"
         ),
         // Executable test runner instead of an XCTest/Swift-Testing target so
-        // `swift test`/`swift run NanolyticaTests` works on a stock Swift
+        // `swift run NanolyticaTests` works on a stock Swift
         // toolchain without Xcode.
         .executableTarget(
             name: "NanolyticaTests",

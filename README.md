@@ -21,20 +21,20 @@ Swift client for [Nanolytica Cloud](https://cloud.nanolytica.org) analytics. Sup
 Add to `Package.swift`:
 
 ```swift
-.package(url: "https://github.com/eringen/nanolytica-cloud.git", from: "0.1.0")
+.package(url: "https://github.com/Nanolytica/nanolytica-ios-sdk.git", branch: "main")
 ```
 
 Add `Nanolytica` to your target's dependencies:
 
 ```swift
 .target(name: "MyApp", dependencies: [
-    .product(name: "Nanolytica", package: "nanolytica-cloud"),
+    .product(name: "Nanolytica", package: "nanolytica-ios-sdk"),
 ])
 ```
 
 ### Xcode
 
-`File → Add Package Dependencies…` → paste `https://github.com/eringen/nanolytica-cloud` → select `Nanolytica`.
+`File → Add Package Dependencies…` → paste `https://github.com/Nanolytica/nanolytica-ios-sdk` → select `Nanolytica`.
 
 ## Initialization
 
@@ -226,7 +226,7 @@ UTM data appears in the **Sources** tab of your dashboard.
 
 ## Offline persistence
 
-`persist()` serializes the queue to `Application Support/nanolytica/queue.ndjson`. Next `start()` restores and flushes it automatically — events survive force-quits.
+`persist()` serializes the queue to `Application Support/nanolytica/queue.ndjson`. Next `start()` restores and flushes it automatically for the same site and endpoint. Persistence is best effort.
 
 ```swift
 // Call from didEnterBackgroundNotification (shown in the setup examples above)
@@ -265,8 +265,7 @@ func setAnalyticsConsent(_ granted: Bool) {
         Nanolytica.shared.optIn()
     } else {
         Nanolytica.shared.optOut()
-        // Also remove any persisted queue
-        try? FileManager.default.removeItem(at: queueFileURL)
+        // optOut() also removes the saved queue.
     }
 }
 ```
@@ -331,7 +330,7 @@ Records a pageview. All parameters except `path` are optional. No-op if `optOut(
 
 | Parameter | Type | Description |
 |---|---|---|
-| `path` | `String` | Screen path, e.g. `/home` (≤ 2048 chars) |
+| `path` | `String` | Screen path, e.g. `/home` (≤ 2048 UTF-8 bytes) |
 | `referrer` | `String?` | Previous URL |
 | `screenSize` | `String?` | `WIDTHxHEIGHT`, e.g. `"390x844"` |
 | `utmSource` | `String?` | UTM source |
@@ -366,29 +365,29 @@ Toggles analytics globally.
 |---|---|
 | `.notStarted` | `track` called before `start` |
 | `.invalidSiteID` | `siteID` is empty |
-| `.invalidEventName` | Name empty, >64 chars, or bad chars |
+| `.invalidEventName` | Name empty, >64 UTF-8 bytes, or bad UTF-8 bytes |
 | `.reservedPrefix` | Name starts with `nanolytica_` |
 | `.tooManyProps` | More than 10 props |
-| `.invalidPropKey` | Key empty, >64 chars, or bad chars |
-| `.invalidPropValue` | Value >256 chars |
-| `.invalidPath` | Path >2048 chars |
+| `.invalidPropKey` | Key empty, >64 UTF-8 bytes, or bad UTF-8 bytes |
+| `.invalidPropValue` | Value >256 UTF-8 bytes |
+| `.invalidPath` | Path >2048 UTF-8 bytes |
 
 ## Validation rules
 
 | Field | Rule |
 |---|---|
 | `site_id` | Non-empty string |
-| `path` | ≤ 2048 chars |
-| `referrer` | ≤ 2048 chars |
-| `event_name` | 1–64 chars, `^[a-zA-Z0-9_-]+$`, not starting with `nanolytica_` |
-| `props` keys | 1–64 chars, `^[a-zA-Z0-9_-]+$` |
-| `props` values | ≤ 256 chars |
+| `path` | ≤ 2048 UTF-8 bytes |
+| `referrer` | ≤ 2048 UTF-8 bytes |
+| `event_name` | 1–64 UTF-8 bytes, `^[a-zA-Z0-9_-]+$`, not starting with `nanolytica_` |
+| `props` keys | 1–64 UTF-8 bytes, `^[a-zA-Z0-9_-]+$` |
+| `props` values | ≤ 256 UTF-8 bytes |
 | `props` count | ≤ 10 pairs |
 
 ## Transport behavior
 
 - Events queue in memory; a single background `DispatchQueue` drains them one at a time.
-- 5xx and network errors retry with 1 s / 2 s / 4 s backoff (blocking the drain goroutine). 4xx errors drop the event.
+- 408, 429, 5xx and network errors retry with 1 s / 2 s / 4 s backoff (on the serial delivery queue). Other 4xx errors drop the event.
 - Full queue drops oldest.
 - All public methods are thread-safe via `NSLock`.
 
@@ -404,7 +403,7 @@ Toggles analytics globally.
 - Confirm the site is **Native App** type.
 
 **`start` throws `invalidSiteID`**
-- `siteID` is empty. Check that your UUID environment variable or plist entry is set.
+- Check the UUID, endpoint, positive buffer size and user-agent byte limit.
 
 **Offline events not appearing after re-launch**
 - `persist()` must be called before the app is suspended. Register for `didEnterBackgroundNotification` at launch.
@@ -423,3 +422,5 @@ The test target is a plain executable (not XCTest), so it runs on a stock Swift 
 ## License
 
 MIT
+
+Reinitialization clears pending memory events. Saved events from a different site or endpoint are discarded. Opt-out removes saved and pending events and stops retries; requests already received cannot be recalled. Flush completion waits for delivery attempts, not database confirmation. These SDK pageviews do not measure engagement or Web Vitals.
